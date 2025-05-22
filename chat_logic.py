@@ -6,9 +6,13 @@ from google.generativeai.types import GenerationConfig, ContentDict, PartDict
 from google.ai.generativelanguage import SafetySetting, HarmCategory
 from PIL import Image
 import io
+import traceback
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -17,15 +21,18 @@ API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not API_KEY:
     logger.error("GOOGLE_API_KEY not found in environment variables.")
-    # Consider raising an error or handling this more gracefully in a production app
+    raise ValueError("GOOGLE_API_KEY not found in environment variables.")
 
 try:
     genai.configure(api_key=API_KEY)
+    logger.info("Successfully configured Google Generative AI")
 except Exception as e:
-    logger.error(f"Failed to configure Google Generative AI: {e}")
+    logger.error(f"Failed to configure Google Generative AI: {str(e)}")
+    logger.error(traceback.format_exc())
+    raise
 
 # --- Model Configuration ---
-MODEL_NAME = "gemini-2.5-flash-preview-05-20" # As specified by user
+MODEL_NAME = "gemini-2.5-flash-preview-05-20"
 
 # System Prompt defining the AI's persona and behavior
 SYSTEM_PROMPT = """
@@ -76,10 +83,10 @@ Examples:
 
 # Generation Configuration
 generation_config = GenerationConfig(
-    temperature=0.5, # Lower for more factual, less creative answers
+    temperature=0.5,
     top_p=0.95,
     top_k=64,
-    max_output_tokens=8192, # Sufficient for detailed explanations
+    max_output_tokens=8192,
     response_mime_type="text/plain",
 )
 
@@ -91,93 +98,93 @@ safety_settings = [
     SafetySetting(category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=SafetySetting.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE),
 ]
 
-# Store active chat sessions in memory (simplified for this "one-shot" Q&A model, but good for context if evolved)
-# For a stateless Q&A, session management might be less critical unless you implement follow-ups.
-active_models = {} # Could store initialized model instances if configs vary, or just use one.
+# Store active chat sessions in memory
+active_models = {}
 
 def get_model_instance(session_id: str):
-    # This function can be expanded if you need different model configs per session/user
-    # For now, it returns a new model instance each time for stateless operation,
-    # or could cache one if system_instruction/configs are static.
-    if session_id not in active_models: # Or simply create new each time for stateless
-        logger.info(f"Initializing model for session/request: {session_id}")
-        try:
+    try:
+        if session_id not in active_models:
+            logger.info(f"Initializing model for session/request: {session_id}")
             model = genai.GenerativeModel(
                 model_name=MODEL_NAME,
                 safety_settings=safety_settings,
-                system_instruction=SYSTEM_PROMPT, # System instruction directly in the model
-                generation_config=generation_config # Pass full config object
+                system_instruction=SYSTEM_PROMPT,
+                generation_config=generation_config
             )
-            active_models[session_id] = model # Cache if needed, or don't if stateless
+            active_models[session_id] = model
             return model
-        except Exception as e:
-            logger.error(f"Error initializing model: {e}")
-            raise
-    return active_models[session_id]
+        return active_models[session_id]
+    except Exception as e:
+        logger.error(f"Error initializing model: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise
 
 def generate_answer(session_id: str, text_prompt: str | None, image_data: bytes | None, image_mime_type: str | None):
     """
     Generates an answer using the Gemini model, potentially with image input.
     """
-    logger.info(f"Generating answer for session_id: {session_id}")
-
-    contents_list = []
-
-    if image_data and image_mime_type:
-        try:
-            # Ensure image_data is bytes, not UploadFile object directly if coming from FastAPI
-            if hasattr(image_data, 'read'): # If it's a file-like object
-                img_bytes = image_data.read()
-            else:
-                img_bytes = image_data
-
-            pil_image = Image.open(io.BytesIO(img_bytes)) # Validate/process with PIL
-            logger.info(f"Image MIME type: {image_mime_type}, size: {len(img_bytes)} bytes")
-            contents_list.append(PartDict(inline_data=PartDict.Blob(mime_type=image_mime_type, data=img_bytes)))
-        except Exception as e:
-            logger.error(f"Error processing image: {e}")
-            # Fallback or raise error
-            return "I had trouble understanding the image. Please try uploading a clear image in PNG or JPEG format."
-
-    if text_prompt:
-        contents_list.append(PartDict(text=text_prompt))
-    elif not image_data: # Must have at least text or image
-        logger.error("No text prompt or image data provided.")
-        return "Please provide a question or an image."
-
-    if not contents_list:
-        logger.error("Content list is empty. Cannot generate answer.")
-        return "I didn't receive any input to process."
-
     try:
-        logger.info(f"Sending to Gemini: {len(contents_list)} parts. Text prompt (first 50 chars): '{text_prompt[:50] if text_prompt else 'N/A'}'")
+        logger.info(f"Generating answer for session_id: {session_id}")
 
-        # Using the direct `generate_content` method for multimodal input as per docs
-        model_instance = genai.GenerativeModel(
-            MODEL_NAME,
-            system_instruction=SYSTEM_PROMPT, # Pass system instruction at model level
-            safety_settings=safety_settings
-        )
+        contents_list = []
 
-        response = model_instance.generate_content(
-            contents=contents_list, # List of Parts or strings/Images
-            generation_config=generation_config, # Full config object
-        )
+        if image_data and image_mime_type:
+            try:
+                if hasattr(image_data, 'read'):
+                    img_bytes = image_data.read()
+                else:
+                    img_bytes = image_data
 
-        logger.info(f"Received response. Usage metadata: {response.usage_metadata if hasattr(response, 'usage_metadata') else 'N/A'}")
+                pil_image = Image.open(io.BytesIO(img_bytes))
+                logger.info(f"Image MIME type: {image_mime_type}, size: {len(img_bytes)} bytes")
+                contents_list.append(PartDict(inline_data=PartDict.Blob(mime_type=image_mime_type, data=img_bytes)))
+            except Exception as e:
+                logger.error(f"Error processing image: {str(e)}")
+                logger.error(traceback.format_exc())
+                return "I had trouble understanding the image. Please try uploading a clear image in PNG or JPEG format."
 
-        if not response.parts:
-            block_reason_text = "Unknown reason"
-            if response.prompt_feedback and response.prompt_feedback.block_reason:
-                 block_reason_text = response.prompt_feedback.block_reason.name
-            logger.warning(f"Response potentially blocked. Finish reason: {block_reason_text}")
-            return f"I couldn't generate a response for that query due to safety guidelines ({block_reason_text}). Could you try rephrasing or asking something else?"
+        if text_prompt:
+            contents_list.append(PartDict(text=text_prompt))
+        elif not image_data:
+            logger.error("No text prompt or image data provided.")
+            return "Please provide a question or an image."
 
-        # Extract text from response
-        # response.text directly gives the combined text of all parts
-        response_text = response.text
-        return response_text
+        if not contents_list:
+            logger.error("Content list is empty. Cannot generate answer.")
+            return "I didn't receive any input to process."
+
+        try:
+            logger.info(f"Sending to Gemini: {len(contents_list)} parts. Text prompt (first 50 chars): '{text_prompt[:50] if text_prompt else 'N/A'}'")
+
+            model_instance = genai.GenerativeModel(
+                MODEL_NAME,
+                system_instruction=SYSTEM_PROMPT,
+                safety_settings=safety_settings
+            )
+
+            response = model_instance.generate_content(
+                contents=contents_list,
+                generation_config=generation_config,
+            )
+
+            logger.info(f"Received response. Usage metadata: {response.usage_metadata if hasattr(response, 'usage_metadata') else 'N/A'}")
+
+            if not response.parts:
+                block_reason_text = "Unknown reason"
+                if response.prompt_feedback and response.prompt_feedback.block_reason:
+                     block_reason_text = response.prompt_feedback.block_reason.name
+                logger.warning(f"Response potentially blocked. Finish reason: {block_reason_text}")
+                return f"I couldn't generate a response for that query due to safety guidelines ({block_reason_text}). Could you try rephrasing or asking something else?"
+
+            response_text = response.text
+            return response_text
+
+        except Exception as e:
+            logger.error(f"Error during Gemini API call: {str(e)}")
+            logger.error(traceback.format_exc())
+            return f"Sorry, I encountered an error trying to process your request: {str(e)}"
 
     except Exception as e:
-        logger.error(f"Error during Gemini API call: {e}", exc_info=True)
-        return f"Sorry, I encountered an error trying to process your request: {str(e)}" 
+        logger.error(f"Unexpected error in generate_answer: {str(e)}")
+        logger.error(traceback.format_exc())
+        return f"An unexpected error occurred: {str(e)}" 
