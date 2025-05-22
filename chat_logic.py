@@ -107,7 +107,6 @@ def get_model_instance(session_id: str):
             model = genai.GenerativeModel(
                 model_name=MODEL_NAME,
                 safety_settings=safety_settings,
-                system_instruction=SYSTEM_PROMPT,
                 generation_config=generation_config
             )
             active_models[session_id] = model
@@ -157,13 +156,15 @@ def generate_answer(session_id: str, text_prompt: str | None, image_data: bytes 
 
             model_instance = genai.GenerativeModel(
                 MODEL_NAME,
-                system_instruction=SYSTEM_PROMPT,
-                safety_settings=safety_settings
+                safety_settings=safety_settings,
+                generation_config=generation_config
             )
 
+            # Add system prompt as the first content
+            contents_list.insert(0, PartDict(text=SYSTEM_PROMPT))
+
             response = model_instance.generate_content(
-                contents=contents_list,
-                generation_config=generation_config,
+                contents=contents_list
             )
 
             logger.info(f"Received response. Usage metadata: {response.usage_metadata if hasattr(response, 'usage_metadata') else 'N/A'}")
