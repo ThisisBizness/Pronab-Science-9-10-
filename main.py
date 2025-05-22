@@ -1,155 +1,139 @@
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request, File, UploadFile, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import logging
 import uuid
 import os
-import shutil
-from pathlib import Path
-import sys
-import traceback
+import shutil # For file operations, if needed, though not for just passing bytes.
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Add the current directory to Python path
-current_dir = Path(__file__).parent
-sys.path.append(str(current_dir))
-
-try:
-    from chat_logic import generate_answer
-except Exception as e:
-    logger.error(f"Failed to import chat_logic: {str(e)}")
-    logger.error(traceback.format_exc())
-    raise
-
-# Define the response body structure
-class AnswerResponse(BaseModel):
-    session_id: str
-    answer: str
+from chat_logic import send_message_to_model, start_new_chat, active_chats, logger, last_questions_context, last_answers
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Science Helper App",
-    description="Ask science questions (Physics, Chemistry, Biology) for Class 10 and below. Supports image uploads.",
+    title="Science Helper (Up to Class 10)",
+    description="Ask questions about Physics, Chemistry, or Biology (text or image)",
     version="0.1.0"
 )
 
-# CORS Middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Get the current directory
-static_dir = current_dir / "static"
-if not static_dir.exists():
-    static_dir.mkdir(parents=True)
+# Mount static files
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir)
     logger.info(f"Created static directory at {static_dir}")
 
 try:
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
     logger.info(f"Mounted static directory from {static_dir}")
-except Exception as e:
-    logger.error(f"Failed to mount static directory: {str(e)}")
-    logger.error(traceback.format_exc())
+except RuntimeError as e:
+    logger.warning(f"Could not mount static directory: {e}. Ensure 'static' directory exists at {static_dir}.")
+
 
 # --- API Endpoints ---
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def read_root(request: Request):
-    """Serves the HTML interface."""
+    index_html_path = os.path.join(static_dir, "index.html")
     try:
-        index_html_path = static_dir / "index.html"
-        if not index_html_path.exists():
-            logger.error(f"index.html not found at {index_html_path}")
-            raise HTTPException(status_code=404, detail="Frontend interface not found.")
-        
         with open(index_html_path, "r", encoding="utf-8") as f:
             html_content = f.read()
         return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        logger.error(f"{index_html_path} not found.")
+        raise HTTPException(status_code=404, detail="Frontend interface not found.")
     except Exception as e:
-        logger.error(f"Error serving index.html: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error serving frontend: {str(e)}")
+        logger.error(f"Error reading {index_html_path}: {e}")
+        raise HTTPException(status_code=500, detail="Server configuration error.")
 
-@app.post("/ask-science", response_model=AnswerResponse)
-async def ask_science_question(
-    request: Request,
-    session_id: str = Form(None),
-    text_question: str = Form(None),
-    image_question: UploadFile = File(None)
+class AnswerResponse(BaseModel):
+    session_id: str
+    answer: str
+
+@app.post("/ask", response_model=AnswerResponse)
+async def ask_question_endpoint(
+    session_id: str | None = Form(None),
+    question: str | None = Form(None),
+    action: str = Form("ask"), # "ask", "regenerate", "simplify"
+    image: UploadFile | None = File(None) # Image file is optional
 ):
-    """
-    Receives a science question (text and/or image) and returns an answer.
-    """
-    try:
-        current_session_id = session_id if session_id else str(uuid.uuid4())
-        logger.info(f"Received request for session: {current_session_id}. Text: '{text_question}'. Image: {image_question.filename if image_question else 'No'}")
+    current_session_id = session_id
 
-        if not text_question and not image_question:
-            raise HTTPException(status_code=400, detail="Please provide a question (text or image).")
+    # Basic validation
+    if action == "ask" and not question and not image:
+        raise HTTPException(status_code=400, detail="Please provide a question or an image.")
 
-        image_data_bytes: bytes | None = None
-        image_mime_type: str | None = None
-
-        if image_question:
-            if image_question.content_type not in ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]:
-                raise HTTPException(status_code=400, detail="Invalid image type. Please upload JPEG, PNG, WEBP, HEIC, or HEIF.")
-            try:
-                image_data_bytes = await image_question.read()
-                image_mime_type = image_question.content_type
-                logger.info(f"Image received: {image_question.filename}, type: {image_mime_type}, size: {len(image_data_bytes)} bytes")
-            except Exception as e:
-                logger.error(f"Error reading uploaded image: {str(e)}")
-                logger.error(traceback.format_exc())
-                raise HTTPException(status_code=500, detail="Could not process uploaded image.")
-            finally:
-                await image_question.close()
-
+    # Session handling
+    if not current_session_id:
+        if action != "ask":
+            raise HTTPException(status_code=400, detail="Session ID is required for regenerate/simplify actions.")
+        current_session_id = str(uuid.uuid4())
         try:
-            bot_response = generate_answer(
-                session_id=current_session_id,
-                text_prompt=text_question,
-                image_data=image_data_bytes,
-                image_mime_type=image_mime_type
-            )
-            return AnswerResponse(session_id=current_session_id, answer=bot_response)
+            start_new_chat(current_session_id)
+            logger.info(f"Started new session: {current_session_id}")
         except Exception as e:
-            logger.error(f"Error generating answer: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Error generating answer: {str(e)}")
+            logger.error(f"Failed to start new chat session {current_session_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Could not initialize chat session: {e}")
+    elif current_session_id not in active_chats:
+        logger.warning(f"Session ID {current_session_id} provided but not found. Starting new chat for this ID.")
+        try:
+            start_new_chat(current_session_id)
+        except Exception as e:
+            logger.error(f"Failed to re-initialize chat session {current_session_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Could not initialize chat session: {e}")
+
+    # Image processing
+    image_data_bytes: bytes | None = None
+    image_mime_type: str | None = None
+    if image:
+        # Ensure it's a valid image type if necessary, or let Gemini handle it.
+        # Common web image types: image/jpeg, image/png, image/webp, image/gif
+        allowed_mime_types = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"]
+        if image.content_type not in allowed_mime_types:
+            raise HTTPException(status_code=400, detail=f"Unsupported image type: {image.content_type}. Please use JPEG, PNG, WEBP, GIF, HEIC or HEIF.")
+        
+        image_data_bytes = await image.read()
+        image_mime_type = image.content_type
+        logger.info(f"Received image: {image.filename}, type: {image_mime_type}, size: {len(image_data_bytes)} bytes")
+
+
+    # Prepare for chat_logic
+    # The `send_message_to_model` will use its internal context for regenerate/simplify
+    # The `question` text for regenerate/simplify is more of a trigger than the primary content
+    message_for_logic = question
+    if action == "regenerate":
+        if not last_questions_context.get(current_session_id, {}).get('text') and not last_questions_context.get(current_session_id, {}).get('image_parts'):
+             raise HTTPException(status_code=404, detail="No previous question found in this session to regenerate.")
+        # `message_for_logic` can be minimal, chat_logic handles reconstruction.
+    elif action == "simplify":
+        if not last_answers.get(current_session_id):
+            raise HTTPException(status_code=404, detail="No previous answer found in this session to simplify.")
+        # `message_for_logic` can be minimal.
+
+
+    try:
+        bot_response = send_message_to_model(
+            session_id=current_session_id,
+            text_message=message_for_logic,
+            image_data=image_data_bytes,
+            image_mime_type=image_mime_type,
+            action=action
+        )
+        return AnswerResponse(session_id=current_session_id, answer=bot_response)
 
     except HTTPException as e:
         raise e
     except Exception as e:
-        logger.error(f"Unhandled exception in /ask-science endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+        logger.error(f"Unhandled exception in /ask endpoint for session {current_session_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {e}")
+
 
 @app.get("/health", status_code=200)
 async def health_check():
-    """Simple health check endpoint."""
-    try:
-        return {"status": "Science Helper is A-OK!"}
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+    return {"status": "ok", "message": "Science Helper is running!"}
 
-# For local development
 if __name__ == "__main__":
     import uvicorn
-    logger.info("Starting Uvicorn server locally for Science Helper App...")
+    logger.info("Starting Uvicorn server locally for Science Helper...")
     if not os.getenv("GOOGLE_API_KEY"):
         logger.warning("GOOGLE_API_KEY not set in environment. Please create a .env file.")
 

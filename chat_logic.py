@@ -21,69 +21,69 @@ API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not API_KEY:
     logger.error("GOOGLE_API_KEY not found in environment variables.")
-    raise ValueError("GOOGLE_API_KEY not found in environment variables.")
+    # In a real app, you might want to prevent startup or raise a more critical error.
 
 try:
     genai.configure(api_key=API_KEY)
-    logger.info("Successfully configured Google Generative AI")
 except Exception as e:
-    logger.error(f"Failed to configure Google Generative AI: {str(e)}")
-    logger.error(traceback.format_exc())
-    raise
+    logger.error(f"Failed to configure Google Generative AI: {e}")
 
 # --- Model Configuration ---
-MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+MODEL_NAME = "gemini-1.5-flash-latest" # Using the latest flash model available generally.
+                                        # The specific preview 'gemini-1.5-flash-preview-05-20' might phase out.
+                                        # If you specifically need the preview, ensure it's available.
 
-# System Prompt defining the AI's persona and behavior
+# System Prompt for Science Helper (up to Class 10, Physics, Chem, Bio, image input)
 SYSTEM_PROMPT = """
-**Your Role:**
-You are a helpful and knowledgeable Science Assistant for students up to Class 10.
-You specialize in Physics, Chemistry, and Biology.
-Your goal is to provide clear, simple, and accurate explanations and answers to science questions.
+**Your Role and Persona:**
+You are a friendly and knowledgeable "Science Helper" for students up to Class 10. You specialize in Physics, Chemistry, and Biology. Your goal is to make science easy and fun to understand.
 
 **Language:**
-All your responses MUST be in English.
+All your responses MUST be in clear, simple **English**.
 
-**How to Answer (Core Instructions):**
-1.  **Receive User Input:** A student will provide a question, which might include text and/or an image.
+**Core Interaction Protocol:**
+1.  **Receive User Input:** A student will ask a question. This might be text-only, an image of a question (e.g., from a textbook or worksheet), or a combination of text and an image.
 2.  **Understand and Analyze:**
-    * If an image is provided, carefully analyze its content, especially if it contains the question (e.g., a photo of a textbook page or diagram).
-    * Understand the core science concepts involved in the text and/or image.
-    * Use your "thinking" capability to break down the problem and plan a comprehensive but easy-to-understand answer.
-3.  **Provide Only the Direct Answer:**
-    * Go straight to the answer. No greetings, no "Hello, I am...", no "I will now explain...", no "I hope this helps", etc.
-    * Explain the underlying scientific principles in simple terms suitable for a student up to Class 10.
-    * If it's a problem-solving question, explain the steps clearly.
-    * Be detailed enough to be helpful, but avoid unnecessary jargon or overly complex details.
-    * Use examples relevant to everyday life or simple experiments where appropriate.
-    * Format your answers for clarity: use bullet points, bold key terms, and ensure good readability.
-4.  **Handling Follow-up Requests (If any functionality is added for this later):**
-    * If asked to "regenerate" or "explain differently," provide an alternative explanation of the original question, perhaps using different examples or analogies.
-    * If asked to "simplify," break down your previous explanation further, using even more basic language. Focus on the core concepts.
+    * Carefully look at any images provided. Identify text, diagrams, or specific elements in the image that are part of the question.
+    * Read any accompanying text.
+    * Use your "thinking" capability to understand the core scientific concept being asked about (Physics, Chemistry, or Biology).
+    * Break down the problem into smaller, manageable parts.
+3.  **Provide Clear, Step-by-Step Answers:**
+    * Provide ONLY the direct answer to the question. No extra conversational phrases, greetings, or sign-offs.
+    * Explain the underlying scientific principles in a simple, step-by-step manner.
+    * Use age-appropriate language (for students up to Class 10). Avoid complex jargon unless you explain it immediately.
+    * If it's a problem-solving question (e.g., a physics calculation or balancing a chemical equation), show the steps clearly.
+    * Use examples relevant to everyday life or simple experiments where possible.
+    * Format your answers for easy reading: use bullet points, **bold text** for key terms, and line breaks.
+4.  **Handling Follow-up Requests (Regenerate/Simplify):**
+    * If the user asks to **"Explain again"**, **"Regenerate"**, or similar, provide an alternative explanation or solution for the *original question*. Try a different approach or example, maintaining clarity and accuracy. Assume they are referring to the last question you answered.
+    * If the user asks to **"Make it simpler"**, **"Explain more easily"**, or similar, break down your *previous explanation* into even simpler steps or use more basic language. Focus on clarity for a younger learner. Assume they are referring to the last answer you provided.
+5.  **If an Image is Unclear:**
+    * If an uploaded image is blurry, unreadable, or doesn't seem to contain a clear question, politely ask the student to upload a clearer image or type the question. For example: "The image is a bit unclear. Could you please try uploading a clearer picture or typing out the question?"
 
-**Your Tone:**
-* **Clear and Simple:** Easy for a Class 10 student (or younger) to understand.
-* **Encouraging and Patient:** Make learning science approachable.
-* **Accurate and Factual:** Ensure all information is correct.
-* **Direct and Focused:** Get straight to the point.
+**Tone:**
+* **Encouraging and Patient:** Make students feel comfortable asking questions.
+* **Clear and Simple:** Avoid talking down to them, but ensure explanations are easy to grasp.
+* **Accurate and Factual:** Provide correct scientific information.
+* **Engaging:** Try to make science interesting!
 
 **Scope of Knowledge:**
-Physics, Chemistry, and Biology topics typically covered in the curriculum up to Class 10 (e.g., Indian CBSE/ICSE, or general international middle/early high school science).
-Examples:
-* Physics: Motion, Force, Energy, Light, Sound, Electricity, Magnetism.
-* Chemistry: Matter, Atoms, Molecules, Chemical Reactions, Acids/Bases, Metals/Non-metals, Carbon compounds (introductory).
-* Biology: Cells, Tissues, Life Processes (nutrition, respiration, transport, excretion), Control & Coordination, Reproduction, Heredity, Our Environment.
-* DO NOT answer Mathematics questions. If a question is clearly math-focused, politely state that you specialize in science subjects like Physics, Chemistry, and Biology.
+General science topics in Physics, Chemistry, and Biology typically covered in the curriculum for students up to Class 10 in India (e.g., CBSE, ICSE, State Boards). This includes:
+* **Physics:** Motion, Force, Energy, Light, Sound, Electricity, Magnetism, basic concepts of the universe.
+* **Chemistry:** Matter, Atoms and Molecules, Chemical Reactions, Acids/Bases/Salts, Metals/Non-metals, Carbon compounds (introductory).
+* **Biology:** Cells, Tissues, Life Processes (nutrition, respiration, transport, excretion), Control and Coordination, Reproduction, Heredity and Evolution, Our Environment.
 
 **Important Rules (Limitations):**
-* Only answer questions within the scope of Physics, Chemistry, and Biology for students up to Class 10.
-* If a question is unclear, or an image is unreadable, politely ask for clarification or a better image. For example: "The image is a bit blurry, could you try taking a clearer picture?" or "Could you please tell me a bit more about what you're asking?"
-* CRITICAL: Provide ONLY the answer. No introductory phrases, no concluding remarks, no self-references (e.g., "As an AI..."), and no disclaimers in your direct response. The answer should start immediately with the explanation or solution.
+* **Strictly no Math questions.** If a question is primarily a math problem (even if science-themed), politely state that you can help with the science concepts but not the mathematical calculations themselves. For example: "I can help explain the science behind this, but I'm not designed to solve math problems."
+* Only answer questions within the scope of Physics, Chemistry, and Biology for up to Class 10.
+* Do not engage in conversations unrelated to these science subjects.
+* If a question is ambiguous (even with text), ask for clarification. Example: "To help you better, could you tell me a bit more about [specific part of the question]?"
+* **CRITICAL: Provide ONLY the answer. Do NOT add any introductory phrases (like "Hello!"), concluding phrases (like "Hope this helps!"), or any form of self-identification or disclaimers in your response. Just the direct scientific explanation or solution.**
 """
 
 # Generation Configuration
 generation_config = GenerationConfig(
-    temperature=0.5,
+    temperature=0.5, # Slightly lower for factual accuracy
     top_p=0.95,
     top_k=64,
     max_output_tokens=8192
@@ -97,94 +97,101 @@ safety_settings = [
     SafetySetting(category=HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=SafetySetting.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE),
 ]
 
-# Store active chat sessions in memory
-active_models = {}
+# --- Chat Session Management ---
+active_chats = {} # Key: session_id, Value: genai.ChatSession
+last_questions_context = {} # Key: session_id, Value: {'text': str, 'image_parts': list[PartDict] or None}
+last_answers = {} # Key: session_id, Value: str
 
-def get_model_instance(session_id: str):
+def start_new_chat(session_id: str):
+    logger.info(f"Starting new chat session: {session_id}")
     try:
-        if session_id not in active_models:
-            logger.info(f"Initializing model for session/request: {session_id}")
-            model = genai.GenerativeModel(
-                model_name=MODEL_NAME,
-                safety_settings=safety_settings,
-                generation_config=generation_config
-            )
-            active_models[session_id] = model
-            return model
-        return active_models[session_id]
+        model = genai.GenerativeModel(
+            model_name=MODEL_NAME,
+            safety_settings=safety_settings,
+            generation_config=generation_config
+        )
+        chat_session = model.start_chat(history=[])
+        active_chats[session_id] = chat_session
+        last_questions_context[session_id] = {'text': None, 'image_parts': None}
+        last_answers[session_id] = None
+        return chat_session
     except Exception as e:
-        logger.error(f"Error initializing model: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"Error initializing model or starting chat for session {session_id}: {e}")
         raise
 
-def generate_answer(session_id: str, text_prompt: str | None, image_data: bytes | None, image_mime_type: str | None):
-    """
-    Generates an answer using the Gemini model, potentially with image input.
-    """
+def send_message_to_model(session_id: str, text_message: str | None = None, image_data: bytes | None = None, image_mime_type: str | None = None, action: str = "ask"):
+    if session_id not in active_chats:
+        logger.warning(f"Session ID {session_id} not found. Starting new chat.")
+        start_new_chat(session_id)
+
+    chat_session = active_chats[session_id]
+    
+    content_parts = []
+    current_question_text = text_message
+    current_image_parts = None
+
+    if image_data and image_mime_type:
+        current_image_parts = [PartDict(inline_data=PartDict(data=image_data, mime_type=image_mime_type))]
+
+    # Construct the prompt for the model based on action and available context
+    if action == "ask":
+        if text_message:
+            content_parts.append(PartDict(text=text_message))
+        if current_image_parts:
+            content_parts.extend(current_image_parts)
+        
+        # Store context for potential follow-ups
+        last_questions_context[session_id] = {'text': text_message, 'image_parts': current_image_parts}
+
+    elif action == "regenerate":
+        prev_context = last_questions_context.get(session_id, {})
+        original_text = prev_context.get('text')
+        original_image_parts = prev_context.get('image_parts')
+
+        prompt_text = "Explain again based on the previous question"
+        if original_text:
+            prompt_text += f" (which was about: '{original_text[:50]}...')."
+        else:
+            prompt_text += "."
+        
+        content_parts.append(PartDict(text=prompt_text))
+        if original_image_parts: # Re-send the original image if there was one
+            content_parts.extend(original_image_parts)
+        current_question_text = prompt_text # For logging
+
+    elif action == "simplify":
+        prev_answer = last_answers.get(session_id)
+        if prev_answer:
+            prompt_text = f"Make the following explanation simpler: \"{prev_answer[:100]}...\""
+        else:
+            prompt_text = "Make the previous explanation simpler." # Fallback
+        content_parts.append(PartDict(text=prompt_text))
+        current_question_text = prompt_text # For logging
+        # Simplification typically doesn't need the original image again unless specified.
+
+    if not content_parts:
+        logger.warning(f"No content to send for session {session_id} with action {action}.")
+        return "I'm sorry, I didn't receive a question or enough context to respond."
+
+    logger.info(f"Sending to session {session_id} (action: {action}): Text='{current_question_text[:70] if current_question_text else 'N/A'}' Image parts present: {bool(current_image_parts or (action == 'regenerate' and last_questions_context.get(session_id, {}).get('image_parts')))}")
+
     try:
-        logger.info(f"Generating answer for session_id: {session_id}")
+        # Add system prompt as the first content
+        content_parts.insert(0, PartDict(text=SYSTEM_PROMPT))
+        
+        response = chat_session.send_message(content_parts)
+        
+        if not response.parts:
+            block_reason = response.prompt_feedback.block_reason.name if response.prompt_feedback and response.prompt_feedback.block_reason else "UNKNOWN_REASON"
+            logger.warning(f"Response potentially blocked for session {session_id}. Reason: {block_reason}")
+            return f"My apologies, but I cannot respond due to safety guidelines ({block_reason}). Could you please rephrase or ask something else?"
 
-        contents_list = []
+        response_text = "".join(part.text for part in response.parts if hasattr(part, 'text'))
+        last_answers[session_id] = response_text # Store the latest answer
 
-        if image_data and image_mime_type:
-            try:
-                if hasattr(image_data, 'read'):
-                    img_bytes = image_data.read()
-                else:
-                    img_bytes = image_data
-
-                pil_image = Image.open(io.BytesIO(img_bytes))
-                logger.info(f"Image MIME type: {image_mime_type}, size: {len(img_bytes)} bytes")
-                contents_list.append(PartDict(inline_data=PartDict.Blob(mime_type=image_mime_type, data=img_bytes)))
-            except Exception as e:
-                logger.error(f"Error processing image: {str(e)}")
-                logger.error(traceback.format_exc())
-                return "I had trouble understanding the image. Please try uploading a clear image in PNG or JPEG format."
-
-        if text_prompt:
-            contents_list.append(PartDict(text=text_prompt))
-        elif not image_data:
-            logger.error("No text prompt or image data provided.")
-            return "Please provide a question or an image."
-
-        if not contents_list:
-            logger.error("Content list is empty. Cannot generate answer.")
-            return "I didn't receive any input to process."
-
-        try:
-            logger.info(f"Sending to Gemini: {len(contents_list)} parts. Text prompt (first 50 chars): '{text_prompt[:50] if text_prompt else 'N/A'}'")
-
-            model_instance = genai.GenerativeModel(
-                MODEL_NAME,
-                safety_settings=safety_settings,
-                generation_config=generation_config
-            )
-
-            # Add system prompt as the first content
-            contents_list.insert(0, PartDict(text=SYSTEM_PROMPT))
-
-            response = model_instance.generate_content(
-                contents=contents_list
-            )
-
-            logger.info(f"Received response. Usage metadata: {response.usage_metadata if hasattr(response, 'usage_metadata') else 'N/A'}")
-
-            if not response.parts:
-                block_reason_text = "Unknown reason"
-                if response.prompt_feedback and response.prompt_feedback.block_reason:
-                     block_reason_text = response.prompt_feedback.block_reason.name
-                logger.warning(f"Response potentially blocked. Finish reason: {block_reason_text}")
-                return f"I couldn't generate a response for that query due to safety guidelines ({block_reason_text}). Could you try rephrasing or asking something else?"
-
-            response_text = response.text
-            return response_text
-
-        except Exception as e:
-            logger.error(f"Error during Gemini API call: {str(e)}")
-            logger.error(traceback.format_exc())
-            return f"Sorry, I encountered an error trying to process your request: {str(e)}"
+        logger.debug(f"Session {session_id} history length: {len(chat_session.history)}")
+        return response_text
 
     except Exception as e:
-        logger.error(f"Unexpected error in generate_answer: {str(e)}")
-        logger.error(traceback.format_exc())
-        return f"An unexpected error occurred: {str(e)}" 
+        logger.error(f"Error during send_message for session {session_id}: {e}", exc_info=True)
+        return f"Sorry, I encountered an error trying to process your request: {e}" 

@@ -1,7 +1,6 @@
-fastapi==0.109.2
-uvicorn[standard]==0.27.1
-google-generativeai==0.3.2
-python-dotenv==1.0.1
-Pillow==10.2.0
-python-multipart==0.0.9
-pydantic==2.6.1 
+fastapi
+uvicorn[standard]
+google-generativeai
+python-dotenv
+Pillow # For potential image manipulation/validation, and used by Gemini SDK for some inputs
+python-multipart # For FastAPI file uploads from forms 
